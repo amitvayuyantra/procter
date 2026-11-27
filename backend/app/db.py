@@ -1,8 +1,9 @@
-"""Tiny SQLite storage: who took the exam, and what happened during it."""
+"""Tiny SQLite storage: who was invited, what they answered, and what happened during the interview."""
+import json
+import secrets
 import sqlite3
 import threading
 import time
-import uuid
 
 from .config import DB_PATH
 
@@ -12,8 +13,9 @@ _conn.row_factory = sqlite3.Row
 _conn.executescript(
     """
     CREATE TABLE IF NOT EXISTS sessions (
-        id TEXT PRIMARY KEY, student_name TEXT, student_email TEXT,
-        started_at REAL, finished_at REAL, score INTEGER, total INTEGER
+        id TEXT PRIMARY KEY, candidate_name TEXT, candidate_email TEXT, position TEXT, template TEXT,
+        created_at REAL, started_at REAL, finished_at REAL, answers TEXT,
+        verdict TEXT, notes TEXT
     );
     CREATE TABLE IF NOT EXISTS events (
         id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, type TEXT,
@@ -29,27 +31,44 @@ def _all(sql: str, args: tuple = ()) -> list[dict]:
         return [dict(r) for r in _conn.execute(sql, args).fetchall()]
 
 
-def create_session(name: str, email: str) -> str:
-    sid = uuid.uuid4().hex[:12]
+def status_of(row: dict) -> str:
+    return "completed" if row["finished_at"] else "in_progress" if row["started_at"] else "invited"
+
+
+def create_session(name: str, email: str, position: str, template: str) -> str:
+    sid = secrets.token_urlsafe(9)  # hard to guess: this is the candidate's private link
     with _lock, _conn:
         _conn.execute(
-            "INSERT INTO sessions (id, student_name, student_email, started_at) VALUES (?,?,?,?)",
-            (sid, name, email, time.time()),
+            "INSERT INTO sessions (id, candidate_name, candidate_email, position, template, created_at) VALUES (?,?,?,?,?,?)",
+            (sid, name, email, position, template, time.time()),
         )
     return sid
 
 
 def get_session(sid: str) -> dict | None:
     rows = _all("SELECT * FROM sessions WHERE id=?", (sid,))
-    return rows[0] if rows else None
+    if not rows:
+        return None
+    row = rows[0]
+    row["answers"] = json.loads(row["answers"]) if row["answers"] else {}
+    row["status"] = status_of(row)
+    return row
 
 
-def finish_session(sid: str, score: int, total: int) -> None:
+def start_session(sid: str) -> None:
+    """Starts the clock the first time only, so reopening the link can't reset the timer."""
     with _lock, _conn:
-        _conn.execute(
-            "UPDATE sessions SET finished_at=?, score=?, total=? WHERE id=?",
-            (time.time(), score, total, sid),
-        )
+        _conn.execute("UPDATE sessions SET started_at=? WHERE id=? AND started_at IS NULL", (time.time(), sid))
+
+
+def finish_session(sid: str, answers: dict[str, str]) -> None:
+    with _lock, _conn:
+        _conn.execute("UPDATE sessions SET finished_at=?, answers=? WHERE id=?", (time.time(), json.dumps(answers), sid))
+
+
+def set_review(sid: str, verdict: str, notes: str) -> None:
+    with _lock, _conn:
+        _conn.execute("UPDATE sessions SET verdict=?, notes=? WHERE id=?", (verdict, notes, sid))
 
 
 def add_event(sid: str, kind: str, points: int, detail: str = "", evidence: str | None = None) -> dict:
@@ -73,8 +92,14 @@ def list_events(sid: str) -> list[dict]:
 
 
 def list_sessions() -> list[dict]:
-    return _all(
-        """SELECT s.*, COALESCE(MIN(100, SUM(e.points)), 0) AS risk, COUNT(e.id) AS event_count
+    rows = _all(
+        """SELECT s.id, s.candidate_name, s.candidate_email, s.position, s.created_at, s.started_at,
+                  s.finished_at, s.verdict,
+                  COALESCE(MIN(100, SUM(e.points)), 0) AS risk,
+                  COUNT(CASE WHEN e.points > 0 THEN 1 END) AS event_count
            FROM sessions s LEFT JOIN events e ON e.session_id = s.id
-           GROUP BY s.id ORDER BY s.started_at DESC"""
+           GROUP BY s.id ORDER BY s.created_at DESC"""
     )
+    for r in rows:
+        r["status"] = status_of(r)
+    return rows

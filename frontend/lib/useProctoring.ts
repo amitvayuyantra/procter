@@ -43,8 +43,9 @@ export function useProctoring(sessionId: string, videoRef: RefObject<HTMLVideoEl
         waiting = false;
         const d = JSON.parse(m.data);
         setStatus({ faces: d.faces, flags: d.flags, risk: d.risk, level: d.level, calibrated: d.calibrated });
-        if (d.new_events?.length) {
-          setWarning(EVENT_LABELS[d.new_events[0].type] ?? "Suspicious activity");
+        const concern = d.new_events?.find((e: { points: number }) => e.points > 0); // not the ID photo
+        if (concern) {
+          setWarning(EVENT_LABELS[concern.type] ?? "Unusual activity");
           setTimeout(() => setWarning(null), 6000);
         }
       };

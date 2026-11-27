@@ -1,20 +1,31 @@
-# AI Proctor
+# AI Interview Proctor
 
-An online exam system that watches for cheating using AI.
+Keeps remote **corporate interviews** honest using AI, and gives recruiters evidence to review.
 
-- **Backend** – Python (FastAPI + MediaPipe + OpenCV)
-- **Frontend** – Next.js (React, TypeScript, Tailwind)
+- **Backend**: Python (FastAPI + MediaPipe + OpenCV)
+- **Frontend**: Next.js (React, TypeScript, Tailwind)
 
-## What it catches
+## How it works
+
+1. **Recruiter** opens `/admin`, signs in with the admin key, and creates an interview (candidate, role, question set). This gives a private link to email to the candidate.
+2. **Candidate** opens the link, agrees to monitoring, allows the camera, and answers the questions in full screen. The timer starts when they press start.
+3. **AI watches** while they answer. It saves a start-of-interview photo for identity checking, and flags problems.
+4. **Recruiter** opens the interview: ID photo, written answers, a timeline of flags with camera snapshots, and a verdict box (*Cleared / Needs follow-up / Concern confirmed*).
+
+## What it flags
 
 | Check | How |
 |---|---|
-| Face missing / more than one person | MediaPipe face landmarks + person detector |
-| Looking away (head turn, eye glance) | Nose position & eye-direction, compared with the student's *own* normal pose (auto-calibrated in the first seconds) |
+| Face missing / someone else in the room | MediaPipe face landmarks + person detector |
+| Looking away (reading from another screen) | Nose position & eye direction, compared with the candidate's *own* normal pose |
 | Phone, book, extra laptop | EfficientDet object detector |
 | Tab switch, leaving full screen, copy/paste, right-click | Browser events |
 
-A problem has to last a few seconds before it counts, and can't repeat for 15 s. This avoids false alarms. Each event adds risk points (see `backend/app/risk.py`); the admin sees a **Low / Medium / High** score with a camera snapshot for every event. **The AI only flags. A human decides.**
+Interview-friendly settings: candidates may glance away for about 6 seconds (thinking, notes) before it counts; a problem can't repeat for 15 s; and the start photo is **not** counted as a concern. **The AI only flags. A person decides, and nobody is rejected automatically.**
+
+## The admin key
+
+It is the recruiter password. It lives only in the **backend**: set `ADMIN_KEY` in `backend/.env` (default `admin123`; change it), restart the backend, then type it on the `/admin` login page. The frontend needs no setting for it.
 
 ## Run it (Windows, Mac, Linux)
 
@@ -53,7 +64,8 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000 for students and http://localhost:3000/admin for the dashboard.
+Open http://localhost:3000/admin for the recruiter dashboard. Candidates use the link it creates.
+In production, set `NEXT_PUBLIC_API_URL` (frontend) and `CORS_ORIGINS` (backend) to your real addresses.
 Webcams only work on `localhost` or HTTPS.
 
 Windows tips: if PowerShell blocks `activate`, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
@@ -65,9 +77,13 @@ cd backend && pytest
 ```
 
 ## Make it yours
-- Questions: `backend/app/exams.py`
+- Interview roles and questions: `backend/app/interviews.py`
 - Strictness (turn angle, hold time, points): top of `backend/app/risk.py`
-- Next steps for real use: login for students, HTTPS, a real database, audio checks, and deleting snapshots after a retention period.
 
-## Limits (be honest with students)
-Cameras, lighting and glasses affect accuracy. Head-turn and phone thresholds were set by reasoning, not tuned on real exam footage, so try them with your own users before relying on them.
+## Before using it on real candidates
+- **Get legal advice.** Camera monitoring of job applicants is regulated (for example GDPR in the EU, biometric rules in some US states). Tell candidates what you collect and for how long, offer an alternative to people who can't or won't be monitored, and delete snapshots after a set period.
+- Add real recruiter logins (one shared key is for demos), HTTPS, and a production database.
+- **Not covered yet:** matching the face to an ID document or detecting a *different person* taking over mid-interview (recruiters compare the start photo by eye), audio (someone whispering help), screen sharing, and live video calls with an interviewer.
+
+## Limits
+Cameras, lighting and glasses affect accuracy. Head-turn and phone thresholds were set by reasoning, not tuned on real interview footage. Try them with your own people first.

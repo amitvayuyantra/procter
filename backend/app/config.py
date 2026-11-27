@@ -9,7 +9,7 @@ load_dotenv(BASE_DIR / ".env")  # settings file works the same on Windows, Mac a
 DATA_DIR = BASE_DIR / "data"
 MODEL_DIR = BASE_DIR / "models"
 EVIDENCE_DIR = DATA_DIR / "evidence"
-DB_PATH = DATA_DIR / "proctor.db"
+DB_PATH = DATA_DIR / "interviews.db"
 
 ADMIN_KEY = os.getenv("ADMIN_KEY", "admin123")
 CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")]

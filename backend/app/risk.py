@@ -11,6 +11,7 @@ from .vision import FrameResult
 
 # Risk points added each time an event is recorded
 POINTS = {
+    "identity_check": 0,  # start-of-interview photo, for the recruiter to verify who it is
     "no_face": 5,
     "multiple_faces": 15,
     "looking_away": 3,
@@ -28,7 +29,7 @@ POINTS = {
 HOLD_SECONDS = {
     "no_face": 4.0,
     "multiple_faces": 2.0,
-    "looking_away": 4.0,
+    "looking_away": 6.0,  # candidates look up to think and glance at notes, so be patient
     "phone_detected": 1.5,
     "book_detected": 3.0,
     "laptop_detected": 3.0,
@@ -38,7 +39,7 @@ COOLDOWN_SECONDS = 15.0  # same problem can't be recorded again within this time
 
 # How far the student may turn from their normal pose (tweak to taste)
 YAW_LIMIT = 0.16
-PITCH_LIMIT = 0.15
+PITCH_LIMIT = 0.18
 GAZE_LIMIT = 0.55
 
 CALIBRATION_FRAMES = 6  # first good frames are used to learn the student's "normal"
