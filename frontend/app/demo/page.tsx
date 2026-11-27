@@ -1,11 +1,11 @@
 "use client";
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import CameraHud from "@/components/CameraHud";
+import LiveConsole from "@/components/LiveConsole";
 import demoFace from "@/lib/demoFace.json";
-import { EMPTY_FRAME, HudFrame } from "@/lib/hud";
+import { Feed, LiveEvent, newFeed, WatchFrame } from "@/lib/hud";
+import { announce, pushFrame } from "@/lib/useLiveFeed";
 
-// A preview of the camera view with made-up data, so you can see every animation without running an interview.
+// A preview of the interviewer's live monitor with made-up data, so every animation can be seen without a real interview.
 const SCENES = {
   tracking: "Normal: face tracked, identity verified",
   scanning: "Start-up: scanning the face",
@@ -16,77 +16,99 @@ const SCENES = {
   lost: "Face not visible",
   blocked: "Camera covered",
   dark: "Dark room",
-  review: "Identity under review",
+  review: "Face does not match reference",
   frozen: "Frozen / still picture feed",
 } as const;
 type Scene = keyof typeof SCENES;
+const ALERT: Partial<Record<Scene, [string, number]>> = {
+  away: ["looking_away", 3], phone: ["phone_detected", 20], person: ["multiple_faces", 15], lost: ["no_face", 5],
+  blocked: ["camera_blocked", 10], review: ["identity_mismatch", 25], frozen: ["static_feed", 25],
+};
 
-function frameFor(scene: Scene, tick: number): HudFrame {
-  const step = Math.floor(tick / 6) % 3; // the head-turn demo moves to its next step every 3 seconds
-  const base: HudFrame = {
-    ...EMPTY_FRAME, faces: 1, calibrated: true, challenge: "passed", checks: { identity: "verified", feed: "live" },
-    hud: { mesh: demoFace.mesh as [number, number][], others: [], boxes: [], pose: [0.1, 0.05], head_away: false, gaze_away: false, blink: tick % 7 === 0, light: 78 },
+function frameFor(scene: Scene, tick: number, risk: number): WatchFrame {
+  const step = Math.floor(tick / 6) % 3; // the head-turn demo moves to its next step every 2 seconds
+  const hud = { mesh: demoFace.mesh as [number, number][], others: [], boxes: [], pose: [0.12, 0.05] as [number, number], head_away: false, gaze_away: false, blink: tick % 9 === 0, light: 78 };
+  const base: WatchFrame = {
+    faces: 1, hud, angles: [0.02, 0.01], flags: [], checks: { identity: "verified", feed: "live" }, calibrated: true,
+    challenge: "passed", challenge_first: "left", challenge_progress: 2, risk, level: risk >= 50 ? "high" : risk >= 25 ? "medium" : "low",
+    identity_score: 0.94, similarity: 0.93, events: [],
   };
-  const hud = base.hud!;
   switch (scene) {
-    case "scanning": return { ...base, calibrated: false, challenge: "waiting", checks: { identity: "scanning", feed: "live" } };
-    case "challenge": {
-      const side = step === 1 ? -1.6 : 1.6;
-      return { ...base, challenge: "active", challengeFirst: "left", challengeProgress: Math.min(step, 2), hud: { ...hud, pose: [step === 2 ? 0 : side, 0.1] } };
-    }
-    case "away": return { ...base, hud: { ...hud, pose: [1.7, 0.3], head_away: true, gaze_away: true } };
+    case "scanning": return { ...base, calibrated: false, challenge: "waiting", checks: { identity: "scanning", feed: "live" }, identity_score: null, similarity: null, angles: null, hud: { ...hud, pose: null } };
+    case "challenge": return { ...base, challenge: "active", challenge_progress: step === 2 ? 1 : step, angles: [step === 1 ? 0.2 : step === 2 ? -0.2 : 0, 0.02], hud: { ...hud, pose: [step === 1 ? 1.6 : step === 2 ? -1.6 : 0, 0.1] } };
+    case "away": return { ...base, angles: [0.34, 0.1], hud: { ...hud, pose: [1.9, 0.5], head_away: true, gaze_away: true } };
     case "phone": return { ...base, hud: { ...hud, boxes: [{ label: "phone", box: [640, 520, 190, 330] }] } };
     case "person": return { ...base, faces: 2, hud: { ...hud, others: [[30, 250, 200, 280]] } };
-    case "lost": return { ...base, faces: 0, hud: { ...hud, mesh: null, pose: null } };
-    case "blocked": return { ...base, faces: 0, flags: ["camera_blocked"], hud: { ...hud, mesh: null, pose: null, light: 2 } };
+    case "lost": return { ...base, faces: 0, angles: null, hud: { ...hud, mesh: null, pose: null } };
+    case "blocked": return { ...base, faces: 0, flags: ["camera_blocked"], angles: null, hud: { ...hud, mesh: null, pose: null, light: 2 } };
     case "dark": return { ...base, flags: ["low_light"], hud: { ...hud, light: 18 } };
-    case "review": return { ...base, checks: { identity: "review", feed: "live" } };
+    case "review": return { ...base, checks: { identity: "review", feed: "live" }, identity_score: 0.04, similarity: 0.05 };
     case "frozen": return { ...base, checks: { identity: "verified", feed: "review" }, hud: { ...hud, blink: false } };
     default: return base;
   }
 }
 
 export default function Demo() {
+  const feed = useRef<Feed>(newFeed());
+  const source = useRef<ImageBitmap | null>(null);
+  const risk = useRef(0);
+  const nextId = useRef(1);
   const [scene, setScene] = useState<Scene>("tracking");
-  const [status, setStatus] = useState<HudFrame>(EMPTY_FRAME);
-  const hudRef = useRef<HudFrame | null>(null);
-  const seq = useRef(0);
+  const [latest, setLatest] = useState<WatchFrame | null>(null);
+  const [events, setEvents] = useState<LiveEvent[]>([]);
+  const [history, setHistory] = useState<number[]>([]);
+  const [startedAt] = useState(() => Date.now() / 1000 - 754);
 
-  // like the real server: two updates per second
+  useEffect(() => {
+    fetch("/demo-face.jpg").then((r) => r.blob()).then(createImageBitmap).then((b) => (source.current = b));
+  }, []);
+
+  // like the real server: about three pictures a second
   useEffect(() => {
     let tick = 0;
-    const push = () => {
-      const f = { ...frameFor(scene, tick++), seq: ++seq.current };
-      hudRef.current = f;
-      setStatus(f);
+    feed.current.online = true;
+    const alert = ALERT[scene];
+    if (alert) {
+      risk.current = Math.min(100, risk.current + alert[1]);
+      const ev: LiveEvent = { id: nextId.current++, type: alert[0], points: alert[1], detail: "", evidence: null, created_at: Date.now() / 1000 };
+      setEvents((e) => [ev, ...e]);
+      announce(feed.current, [ev], performance.now() / 1000);
+    }
+    const push = async () => {
+      if (!source.current) return;
+      const data = frameFor(scene, tick++, risk.current);
+      const bitmap = await createImageBitmap(source.current);
+      pushFrame(feed.current, bitmap, data, performance.now() / 1000);
+      setLatest(data);
+      setHistory((h) => [...h, risk.current].slice(-90));
     };
     push();
-    const t = setInterval(push, 500);
+    const t = setInterval(push, 330);
     return () => clearInterval(t);
   }, [scene]);
 
+  const level = risk.current >= 50 ? "high" : risk.current >= 25 ? "medium" : "low";
   return (
-    <main className="min-h-screen bg-slate-950 p-6 text-slate-100">
-      <div className="mx-auto grid max-w-5xl gap-8 md:grid-cols-[minmax(0,420px)_1fr]">
-        <CameraHud hudRef={hudRef} status={status} connected screenOk>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/demo-face.jpg" alt="Demo face" className="h-full w-full -scale-x-100 object-cover" />
-        </CameraHud>
-        <div>
-          <Link href="/" className="text-sm text-cyan-300 underline">← Home</Link>
-          <h1 className="mt-2 text-2xl font-bold">What the AI shows on the camera</h1>
-          <p className="mt-1 text-slate-400">A preview with made-up data. Pick a situation to see how the camera view reacts.</p>
-          <div className="mt-5 grid gap-2 sm:grid-cols-2">
+    <LiveConsole
+      demo name="Ada Lovelace" position="Backend Engineer" startedAt={startedAt} backHref="/"
+      feed={feed} latest={latest} conn="open" online ended={false}
+      risk={{ value: latest?.risk ?? 0, level: latest?.level ?? level, history }} events={events}
+      referenceUrl="/demo-face.jpg" startPhotoUrl="/demo-face.jpg" evidenceUrl={() => null}
+      extra={
+        <div className="glass rounded-2xl p-4">
+          <p className="font-mono text-[11px] uppercase tracking-[0.25em] text-slate-400">Try a situation</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
             {(Object.keys(SCENES) as Scene[]).map((k) => (
               <button key={k} onClick={() => setScene(k)}
-                className={`rounded-lg border px-3 py-2 text-left text-sm transition ${scene === k ? "border-cyan-400 bg-cyan-400/10 text-cyan-100" : "border-slate-700 text-slate-300 hover:border-slate-500"}`}>
+                className={`rounded-lg border px-3 py-2 text-left text-xs transition ${scene === k ? "border-cyan-300 bg-cyan-400/15 text-cyan-100" : "border-white/10 text-slate-300 hover:border-white/30"}`}>
                 {SCENES[k]}
               </button>
             ))}
           </div>
-          <p className="mt-4 text-xs text-slate-500">Demo photo: NASA, public domain.</p>
+          <button onClick={() => { risk.current = 0; setEvents([]); setHistory([]); }} className="mt-3 font-mono text-[11px] text-slate-400 underline">Reset score</button>
+          <p className="mt-3 text-[11px] text-slate-500">Demo photo: NASA, public domain. In a real interview this view is only shown to the interviewer.</p>
         </div>
-      </div>
-    </main>
+      }
+    />
   );
 }

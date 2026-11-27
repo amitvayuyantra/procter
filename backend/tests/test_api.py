@@ -89,9 +89,8 @@ def test_full_flow(client, monkeypatch, fast_clock):
             for _ in range(CALIBRATION_FRAMES):
                 reply = send(ws)
             assert reply["calibrated"] and reply["challenge"] == "active"
-            assert set(reply) == {"faces", "hud", "checks", "flags", "calibrated", "challenge", "challenge_first",
-                                  "challenge_progress", "new_events"}  # no scores leak to the candidate
-            assert reply["checks"] == {"identity": "off", "feed": "live"} and reply["hud"]["pose"] == [0.0, 0.0]
+            # The candidate gets only what it needs for friendly hints: no AI vision data, no scores
+            assert set(reply) == {"flags", "calibrated", "challenge", "challenge_first", "challenge_progress", "new_events"}
             assert turn_head(ws, cam, reply)["challenge"] == "passed"
 
         events = [e for _ in range(4) for e in send(ws)["new_events"]]  # empty room
@@ -158,11 +157,9 @@ def test_same_face_matches_reference_photo(client):
     client.post(f"/api/interviews/{sid}/start")
     with client.websocket_connect(f"/ws/sessions/{sid}") as ws:
         for _ in range(CALIBRATION_FRAMES + 2):
-            reply = send(ws, FACE)  # the "camera" shows the same face, re-compressed
+            send(ws, FACE)  # the "camera" shows the same face, re-compressed
     detail = admin_view(client, sid)
     assert detail["has_reference"] and detail["identity_label"] == "match" and detail["identity_score"] > 0.8
-    assert reply["checks"]["identity"] == "verified"  # the candidate sees a word, never the score
-    assert len(reply["hud"]["mesh"]) == len(MESH_POINTS) and all(0 <= v <= 1000 for p in reply["hud"]["mesh"] for v in p)
     assert "identity_mismatch" not in [e["type"] for e in detail["events"]]
 
 
@@ -188,3 +185,43 @@ def test_other_face_and_mid_interview_swap(client, monkeypatch, fast_clock):
     detail = admin_view(client, sid)
     kinds = [e["type"] for e in detail["events"]]
     assert detail["identity_label"] == "mismatch" and "identity_mismatch" in kinds and "different_person" in kinds
+
+
+def test_interviewer_live_monitor(client):
+    """The AI vision display goes to the interviewer's screen, never to the candidate's."""
+    sid = new_interview(client, reference_photo=base64.b64encode(FACE).decode())
+
+    for bad in (f"/ws/watch/{sid}?key=wrong", "/ws/watch/nope?key=test-key", f"/ws/watch/{sid}"):
+        with pytest.raises(WebSocketDisconnect):  # needs the admin key and a real interview
+            with client.websocket_connect(bad):
+                pass
+
+    with client.websocket_connect(f"/ws/watch/{sid}?key=test-key") as watch:
+        assert watch.receive_json() == {"type": "hello", "online": False}
+        with client.websocket_connect(f"/ws/sessions/{sid}") as cand:
+            assert watch.receive_json() == {"type": "presence", "online": True}
+            frames = []
+            for _ in range(CALIBRATION_FRAMES + 2):
+                reply = send(cand, FACE)
+                frames.append(watch.receive_json())  # the same picture arrives on the interviewer's screen
+            assert "hud" not in reply and "checks" not in reply and "risk" not in reply
+
+            frame = frames[-1]
+            assert frame["type"] == "frame" and base64.b64decode(frame["image"]) == FACE
+            assert len(frame["hud"]["mesh"]) == len(MESH_POINTS) and all(0 <= v <= 1000 for p in frame["hud"]["mesh"] for v in p)
+            assert frame["checks"] == {"identity": "verified", "feed": "live"} and frame["identity_score"] > 0.8
+            assert frame["risk"] == 0 and frame["level"] == "low" and frame["angles"] is not None
+            assert "identity_check" in [e["type"] for f in frames for e in f["events"]]  # silent to the candidate, visible here
+
+            cand.send_json({"event": "tab_hidden"})
+            cand.receive_json()
+            msg = watch.receive_json()
+            assert msg["type"] == "events" and msg["events"][0]["type"] == "tab_hidden" and msg["risk"] == 8
+        assert watch.receive_json() == {"type": "presence", "online": False}
+
+        with client.websocket_connect(f"/ws/watch/{sid}?key=test-key") as late:  # opened later: not blank
+            assert late.receive_json() == {"type": "hello", "online": False}
+            assert late.receive_json()["type"] == "frame"
+            client.post(f"/api/interviews/{sid}/submit", json={"answers": {}})
+            assert late.receive_json() == {"type": "ended"}
+            assert watch.receive_json() == {"type": "ended"}

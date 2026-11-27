@@ -135,7 +135,10 @@ export default function Admin() {
                   <td>{r.event_count}</td>
                   <td>{r.status === "invited" ? "—" : <RiskBadge level={r.level} score={r.risk} />}</td>
                   <td className="text-slate-600">{r.verdict ? VERDICT_LABELS[r.verdict] : "—"}</td>
-                  <td><Link href={`/admin/${r.id}`} className="text-indigo-600 underline">Open</Link></td>
+                  <td className="space-x-3 whitespace-nowrap">
+                    {r.status === "in_progress" && <Link href={`/admin/${r.id}/live`} className="rounded-full bg-red-600 px-3 py-1 text-xs font-semibold text-white">● Watch live</Link>}
+                    <Link href={`/admin/${r.id}`} className="text-indigo-600 underline">Open</Link>
+                  </td>
                 </tr>
               ))}
               {!rows.length && <tr><td colSpan={7} className="p-6 text-center text-slate-500">No interviews yet. Create one above.</td></tr>}

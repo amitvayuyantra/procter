@@ -21,6 +21,8 @@ from .vision import FrameAnalyzer, FrameResult, normalize_image
 
 analyzer: FrameAnalyzer | None = None
 monitors: dict[str, SessionMonitor] = {}
+watchers: dict[str, set[WebSocket]] = {}  # interviewers watching an interview live
+online: set[str] = set()  # interviews whose candidate camera is connected right now
 
 
 def clock() -> float:
@@ -97,7 +99,7 @@ class SubmitBody(BaseModel):
 
 
 @app.post("/api/interviews/{sid}/submit")
-def submit(sid: str, body: SubmitBody):
+async def submit(sid: str, body: SubmitBody):
     session = db.get_session(sid)
     if not session:
         raise HTTPException(404, "Interview link not found")
@@ -105,6 +107,7 @@ def submit(sid: str, body: SubmitBody):
         raise HTTPException(409, "Already submitted")
     db.finish_session(sid, {k: v[:5000] for k, v in body.answers.items()})
     monitors.pop(sid, None)
+    await broadcast(sid, {"type": "ended"})
     return {"ok": True}
 
 
@@ -123,7 +126,7 @@ def record(sid: str, kind: str, detail: str = "") -> dict:
 
 
 def hud_for(r: FrameResult, mon: SessionMonitor) -> dict:
-    """Everything the browser needs to draw the live AI view on the camera. Positions only, no scores."""
+    """Everything the interviewer's screen needs to draw the live AI view. Positions and states."""
     pose = mon.pose_fractions(r)
     return {
         "mesh": r.mesh,
@@ -137,12 +140,10 @@ def hud_for(r: FrameResult, mon: SessionMonitor) -> dict:
     }
 
 
-def status(mon: SessionMonitor, faces: int, flags: set[str], new_events: list[dict], hud: dict | None) -> dict:
-    """What the candidate's browser is told. Scores and details of the checks are deliberately left out."""
+def status(mon: SessionMonitor, flags: set[str], new_events: list[dict]) -> dict:
+    """What the CANDIDATE's browser is told: only what it needs to show friendly hints.
+    The AI vision display (face mesh, checks, scores) is for the interviewer only and is never sent here."""
     return {
-        "faces": faces,
-        "hud": hud,
-        "checks": {"identity": mon.identity_state, "feed": mon.feed_state},
         "flags": sorted(flags & HINT_FLAGS),
         "calibrated": mon.calibrated,
         "challenge": mon.challenge,
@@ -150,6 +151,42 @@ def status(mon: SessionMonitor, faces: int, flags: set[str], new_events: list[di
         "challenge_progress": mon.challenge_progress,
         "new_events": [{"type": e["type"], "points": e["points"]} for e in new_events if e["type"] not in SILENT_EVENTS],
     }
+
+
+async def broadcast(sid: str, message: dict | str) -> None:
+    """Send something to every interviewer watching this interview. A slow or gone viewer is dropped."""
+    text = message if isinstance(message, str) else json.dumps(message)
+    for w in list(watchers.get(sid, ())):
+        try:
+            await asyncio.wait_for(w.send_text(text), 1.0)
+        except Exception:
+            watchers[sid].discard(w)
+
+
+def live_frame(mon: SessionMonitor, r: FrameResult | None, jpeg: bytes, flags: set[str], hud: dict | None,
+               new_events: list[dict]) -> str:
+    """One picture plus everything the AI knows about it, for the interviewer's live monitor."""
+    angles = None
+    if r and r.yaw is not None and r.pitch is not None and mon.calibrated:
+        angles = [round(r.yaw - mon.baseline_yaw, 3), round(r.pitch - mon.baseline_pitch, 3)]
+    return json.dumps({
+        "type": "frame",
+        "image": base64.b64encode(jpeg).decode(),
+        "faces": r.faces if r else 0,
+        "hud": hud,
+        "angles": angles,
+        "flags": sorted(flags),
+        "checks": {"identity": mon.identity_state, "feed": mon.feed_state},
+        "calibrated": mon.calibrated,
+        "challenge": mon.challenge,
+        "challenge_first": mon.challenge_first,
+        "challenge_progress": mon.challenge_progress,
+        "risk": mon.risk,
+        "level": level_for(mon.risk),
+        "identity_score": mon.identity_score,
+        "similarity": mon.last_similarity,
+        "events": new_events,
+    })
 
 
 @app.websocket("/ws/sessions/{sid}")
@@ -163,8 +200,10 @@ async def proctor_socket(ws: WebSocket, sid: str):
     mon.risk = db.risk_score(sid)
     if mon.reference is None and session["reference_embedding"]:
         mon.reference = np.array(session["reference_embedding"], dtype=np.float32)
+    online.add(sid)
+    await broadcast(sid, {"type": "presence", "online": True})
 
-    faces, flags, hud = 0, set(), None  # the latest camera picture's results (kept for browser-event replies)
+    flags, hud = set(), None  # the latest camera picture's results (kept for browser-event replies)
     try:
         while True:
             msg = await ws.receive()
@@ -177,7 +216,6 @@ async def proctor_socket(ws: WebSocket, sid: str):
                 now = clock()
                 result = await asyncio.to_thread(analyzer.analyze, msg["bytes"], mon.wants_embedding())
                 if result:
-                    faces = result.faces
                     flags, one_offs = mon.process(result, now)
                     hud = hud_for(result, mon)
                     for kind, detail in one_offs:
@@ -187,15 +225,43 @@ async def proctor_socket(ws: WebSocket, sid: str):
                         mon.identity_saved = True
                     for kind in mon.due_events(flags, now):
                         new_events.append(record(sid, kind))
+                    mon.last_payload = live_frame(mon, result, msg["bytes"], flags, hud, new_events)
+                    await broadcast(sid, mon.last_payload)
             elif msg.get("text"):  # a browser event (tab switch, copy, ...)
                 data = json.loads(msg["text"])
                 kind = data.get("event")
                 if kind in BROWSER_EVENTS and mon.browser_event_allowed(kind, clock()):
-                    new_events.append(record(sid, kind, str(data.get("detail", ""))[:200]))
+                    event = record(sid, kind, str(data.get("detail", ""))[:200])
+                    new_events.append(event)
+                    await broadcast(sid, {"type": "events", "events": [event], "risk": mon.risk, "level": level_for(mon.risk)})
 
-            await ws.send_json(status(mon, faces, flags, new_events, hud))
+            await ws.send_json(status(mon, flags, new_events))
     except WebSocketDisconnect:
         pass
+    finally:
+        online.discard(sid)
+        await broadcast(sid, {"type": "presence", "online": False})
+
+
+@app.websocket("/ws/watch/{sid}")
+async def watch_socket(ws: WebSocket, sid: str, key: str = Query(default="")):
+    """The interviewer's live monitor. Needs the admin key (a browser can't set headers on a WebSocket)."""
+    if not hmac.compare_digest(key.encode(), ADMIN_KEY.encode()) or not db.get_session(sid):
+        await ws.close(code=4401)
+        return
+    await ws.accept()
+    watchers.setdefault(sid, set()).add(ws)
+    mon = monitors.get(sid)
+    await ws.send_json({"type": "hello", "online": sid in online})
+    if mon and mon.last_payload:
+        await ws.send_text(mon.last_payload)  # show the latest picture straight away
+    try:
+        while True:
+            await ws.receive_text()  # nothing is expected from the viewer; this just notices when they leave
+    except WebSocketDisconnect:
+        pass
+    finally:
+        watchers.get(sid, set()).discard(ws)
 
 
 # ------------------------------------------------------------- recruiter side

@@ -101,6 +101,8 @@ class SessionMonitor:
     session_embedding: np.ndarray | None = None  # this candidate's fingerprint at the start
     identity_score: float | None = None
     identity_saved: bool = False
+    last_similarity: float | None = None  # latest check of "is it still the same person" (interviewer view only)
+    last_payload: str | None = None  # the interviewer's latest live frame, so a newly opened monitor isn't blank
 
     # head-turn liveness check: "waiting" -> "active" -> "passed" / "failed"
     challenge: str = "waiting"
@@ -228,6 +230,7 @@ class SessionMonitor:
         if self.session_embedding is not None and r.embedding is not None and r.faces == 1 \
                 and r.yaw is not None and abs(r.yaw - self.baseline_yaw) < YAW_LIMIT:
             similarity = float(self.session_embedding @ r.embedding)
+            self.last_similarity = similarity
             self._low_sim = self._low_sim + 1 if similarity < SWAP_THRESHOLD else 0
 
         self._update_static_check(r, now)

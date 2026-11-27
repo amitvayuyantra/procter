@@ -17,7 +17,7 @@ export type SessionRow = {
 };
 export type SessionDetail = SessionRow & {
   title: string; notes: string | null; events: ProctorEvent[]; qa: { question: string; answer: string }[];
-  has_reference: boolean; identity_score: number | null; identity_label: "match" | "uncertain" | "mismatch" | null;
+  started_at: number | null; has_reference: boolean; identity_score: number | null; identity_label: "match" | "uncertain" | "mismatch" | null;
   liveness: "passed" | "failed" | "not_run";
 };
 

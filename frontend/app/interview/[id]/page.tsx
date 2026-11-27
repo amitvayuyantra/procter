@@ -2,7 +2,7 @@
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { API, Interview } from "@/lib/api";
-import CameraHud from "@/components/CameraHud";
+import CandidateCamera from "@/components/CandidateCamera";
 import { useProctoring } from "@/lib/useProctoring";
 
 type Stage = "loading" | "welcome" | "interview" | "done" | "notfound";
@@ -37,7 +37,7 @@ export default function InterviewPage() {
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [error, setError] = useState("");
 
-  const { status, connected, warning, hudRef } = useProctoring(id, videoRef, stage === "interview");
+  const { status, connected, warning } = useProctoring(id, videoRef, stage === "interview");
 
   useEffect(() => {
     fetch(`${API}/api/interviews/${id}`)
@@ -152,7 +152,7 @@ export default function InterviewPage() {
   const checking = status.challenge === "active";
 
   return (
-    <main className="mx-auto grid max-w-6xl gap-6 p-6 md:grid-cols-[1fr_340px]">
+    <main className="mx-auto grid max-w-6xl gap-6 p-6 md:grid-cols-[1fr_320px]">
       {warning && (
         <div className="fixed inset-x-0 top-0 z-10 bg-amber-500 p-3 text-center font-semibold text-white">
           ⚠ Noted: {warning}
@@ -188,15 +188,18 @@ export default function InterviewPage() {
         {/* While the head-turn check runs, the camera moves to the middle of a dimmed screen so the arrows are easy to follow */}
         <div className={checking ? "fixed inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-slate-950/85 p-4 backdrop-blur-sm" : ""}>
           <div className={checking ? "w-[min(92vw,540px)]" : ""}>
-            <CameraHud hudRef={hudRef} status={status} connected={connected}>
+            <CandidateCamera status={status} connected={connected}>
               <video ref={videoRef} autoPlay muted playsInline className="h-full w-full -scale-x-100 object-cover" />
-            </CameraHud>
+            </CandidateCamera>
           </div>
           {checking && (
-            <p className="max-w-md text-center text-white">
-              <b className="text-lg">Quick check.</b> Slowly turn your head to your <b>{status.challengeFirst}</b>, then to
-              your <b>{status.challengeFirst === "left" ? "right" : "left"}</b>, then look back at the screen.
-            </p>
+            <div className="max-w-md text-center text-white">
+              <p>
+                <b className="text-lg">Quick check.</b> Slowly turn your head to your <b>{status.challengeFirst}</b>, then to
+                your <b>{status.challengeFirst === "left" ? "right" : "left"}</b>, then look back at the screen.
+              </p>
+              <p className="mt-2 text-sm text-emerald-300">{status.challengeProgress >= 1 ? "✓ Step 1 done. Now the other side." : "Step 1 of 2"}</p>
+            </div>
           )}
         </div>
         {liveHints.map((h) => (

@@ -60,6 +60,13 @@ export default function Review() {
         </div>
       </div>
 
+      {data.status === "in_progress" && (
+        <Link href={`/admin/${id}/live`} className="flex items-center justify-between rounded-xl bg-slate-900 p-4 text-white shadow">
+          <span><b>● Interview in progress.</b> Watch the candidate with the live AI vision display.</span>
+          <span className="rounded-lg bg-cyan-400 px-3 py-1.5 font-semibold text-slate-900">Watch live →</span>
+        </Link>
+      )}
+
       {data.status === "invited" ? (
         <p className="text-slate-500">The candidate has not started yet.</p>
       ) : (

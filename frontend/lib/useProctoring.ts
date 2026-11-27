@@ -1,9 +1,13 @@
 "use client";
 import { RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { EVENT_LABELS, WS } from "./api";
-import { EMPTY_FRAME, HudFrame } from "./hud";
 
-export type Status = HudFrame;
+/** All the candidate's browser is told: enough for friendly hints. No AI vision data, no scores. */
+export type Status = {
+  flags: string[]; calibrated: boolean;
+  challenge: "waiting" | "active" | "passed" | "failed"; challengeFirst: "left" | "right"; challengeProgress: number;
+};
+const EMPTY: Status = { flags: [], calibrated: false, challenge: "waiting", challengeFirst: "left", challengeProgress: 0 };
 
 const FRAME_EVERY_MS = 330; // about 3 pictures per second: smooth enough for the camera animation, light on the server
 
@@ -14,12 +18,10 @@ const FRAME_EVERY_MS = 330; // about 3 pictures per second: smooth enough for th
  * Returns the AI's latest verdict plus a list of warnings to show the candidate.
  */
 export function useProctoring(sessionId: string, videoRef: RefObject<HTMLVideoElement | null>, active: boolean) {
-  const [status, setStatus] = useState<Status>(EMPTY_FRAME);
+  const [status, setStatus] = useState<Status>(EMPTY);
   const [connected, setConnected] = useState(false);
   const [warning, setWarning] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const hudRef = useRef<HudFrame | null>(null); // latest picture results, read 60 times a second by the camera animation
-  const seq = useRef(0);
 
   const sendEvent = useCallback((event: string) => {
     const ws = wsRef.current;
@@ -34,8 +36,8 @@ export function useProctoring(sessionId: string, videoRef: RefObject<HTMLVideoEl
     let timer: ReturnType<typeof setInterval>;
     let retry: ReturnType<typeof setTimeout>;
     const canvas = document.createElement("canvas");
-    canvas.width = 480;
-    canvas.height = 360;
+    canvas.width = 640; // a bit larger: the interviewer watches this picture live
+    canvas.height = 480;
 
     const connect = () => {
       const ws = new WebSocket(`${WS}/ws/sessions/${sessionId}`);
@@ -44,12 +46,10 @@ export function useProctoring(sessionId: string, videoRef: RefObject<HTMLVideoEl
       ws.onmessage = (m) => {
         waiting = false;
         const d = JSON.parse(m.data);
-        const next: HudFrame = {
-          seq: ++seq.current, faces: d.faces, hud: d.hud, flags: d.flags, checks: d.checks, calibrated: d.calibrated,
+        setStatus({
+          flags: d.flags, calibrated: d.calibrated,
           challenge: d.challenge, challengeFirst: d.challenge_first, challengeProgress: d.challenge_progress,
-        };
-        hudRef.current = next;
-        setStatus(next);
+        });
         const concern = d.new_events?.find((e: { points: number }) => e.points > 0); // not the ID photo
         if (concern) {
           setWarning(EVENT_LABELS[concern.type] ?? "Unusual activity");
@@ -70,7 +70,7 @@ export function useProctoring(sessionId: string, videoRef: RefObject<HTMLVideoEl
       if (waiting || !video || video.readyState < 2 || ws?.readyState !== WebSocket.OPEN) return;
       canvas.getContext("2d")!.drawImage(video, 0, 0, canvas.width, canvas.height);
       waiting = true;
-      canvas.toBlob((blob) => (blob ? ws.send(blob) : (waiting = false)), "image/jpeg", 0.6);
+      canvas.toBlob((blob) => (blob ? ws.send(blob) : (waiting = false)), "image/jpeg", 0.7);
     }, FRAME_EVERY_MS);
 
     return () => {
@@ -105,5 +105,5 @@ export function useProctoring(sessionId: string, videoRef: RefObject<HTMLVideoEl
     };
   }, [active, sendEvent]);
 
-  return { status, connected, warning, hudRef };
+  return { status, connected, warning };
 }

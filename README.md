@@ -9,7 +9,7 @@ Keeps remote **corporate interviews** honest using AI, and gives recruiters evid
 
 1. **Recruiter** opens `/admin`, signs in with the admin key, and creates an interview (candidate, role, question set, and optionally a **reference photo**). This gives a private link to email to the candidate.
 2. **Candidate** opens the link, agrees to monitoring, allows the camera, and answers the questions in full screen. The timer starts when they press start.
-3. **AI watches** while they answer. It saves a start-of-interview photo, checks it against the reference photo, runs a short head-turn liveness check, and keeps flagging problems.
+3. **AI watches** while they answer. It saves a start-of-interview photo, checks it against the reference photo, runs a short head-turn liveness check, and keeps flagging problems. The recruiter can watch all of this live (see below).
 4. **Recruiter** opens the interview: ID photo, written answers, a timeline of flags with camera snapshots, and a verdict box (*Cleared / Needs follow-up / Concern confirmed*).
 
 ## What it flags
@@ -25,21 +25,24 @@ Keeps remote **corporate interviews** honest using AI, and gives recruiters evid
 | **Camera covered or blocked**, dark room | Brightness analysis (a dark room only gets a hint to the candidate) |
 | Tab switch, leaving full screen, copy/paste, right-click | Browser events |
 
-## What the candidate sees on the camera
+## The interviewer's live AI monitor
 
-The candidate's camera panel is a live "AI vision" view (preview it without a webcam at `/demo`):
+While a candidate is interviewing, the recruiter can click **Watch live** (on the dashboard or the interview's page) to open a mission-control view. **Only the interviewer sees it. The candidate sees just their own plain camera.** Preview it without a webcam at `/demo`.
 
-- a glowing **face mesh** with a tracking frame that locks onto the face, and a light beam that scans it
-- **gaze arrows** from each eye, and the eyes flash when they **blink**
-- a **head-pose dial**: your head is the dot, the dashed circle is the allowed range
-- animated **boxes around phones, books, laptops and extra people**
-- an **identity scan** ring that turns into "Identity verified" (or a neutral "Under review")
-- the **head-turn challenge**: the camera comes to the centre of the screen with flowing arrows showing which way to turn
-- a **live-feed pulse line** (it goes flat if the feed looks frozen), a light meter, a blink counter, and a **camera blocked** alert
-- a 9-item checklist under the camera (face, head, gaze, objects, identity, liveness, feed, camera, screen)
+On the live camera picture:
 
-Candidates see each check's *state* in words, but never scores or thresholds: the server only sends face-point positions and one-word states. A candidate who inspects the network traffic finds nothing to tune a cheat against. Respects "reduce motion" settings.
+- a glowing gradient **face mesh** with a ripple of light, data particles flowing around the outline, and a rotating tracking ring
+- **callouts** with live readouts: head yaw and pitch in degrees, gaze, and the face-match score
+- **gaze arrows** from each eye, and the eyes flash when the candidate **blinks**
+- a **head-pose dial**, a pulse line that goes flat if the feed looks frozen, a light meter and a blink counter
+- animated **boxes around phones, books, laptops and extra people**, and sliding **alert toasts** the moment something happens
+- the **liveness challenge** progress, an **identity scan** that resolves to "Identity verified" or "Identity mismatch", and a **camera blocked** alert
 
+Around it: an animated **integrity-score gauge** with a history graph, an **identity panel** (reference photo, start-of-interview photo and match ring), the nine-item **checklist**, and a **live event feed** with snapshots.
+
+How it works: the server relays each camera picture, together with what the AI found in it, to the interviewer's browser. Because the picture and the face points come from the same capture, the overlay always lines up exactly, and the screen blends smoothly between pictures (about 3 per second). Access needs the admin key.
+
+**What the candidate's browser receives:** only friendly hints ("please keep your face visible"), the head-turn instruction, and a warning banner for obvious things like switching tabs. No face data, no checks, no scores. Identity and liveness problems are never announced to the candidate.
 
 Interview-friendly settings: candidates may glance away for about 6 seconds (thinking, notes) before it counts; a problem can't repeat for 15 s; and the start photo is **not** counted as a concern. **The AI only flags. A person decides, and nobody is rejected automatically.**
 

@@ -4,3 +4,24 @@ body { @apply bg-slate-50 text-slate-900 antialiased; }
 @keyframes chipIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes ping-soft { 0% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.5); } 100% { box-shadow: 0 0 0 8px rgba(34, 211, 238, 0); } }
 @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; } }
+
+@keyframes chevron { 0% { opacity: 0; transform: translateX(0); } 40% { opacity: 1; } 100% { opacity: 0; transform: translateX(var(--to)); } }
+
+/* Interviewer live console */
+.grid-bg {
+  background-image: linear-gradient(rgba(34, 211, 238, 0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(34, 211, 238, 0.07) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse at 50% 25%, black 15%, transparent 75%);
+  animation: gridDrift 40s linear infinite;
+}
+@keyframes gridDrift { to { background-position: 44px 44px; } }
+@keyframes floaty { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(40px, -30px); } }
+@keyframes slideIn { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+@keyframes sheen { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.glass {
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.04), 0 24px 60px -28px rgba(34, 211, 238, 0.35);
+}
+.title-gradient { background: linear-gradient(90deg, #67e8f9, #93c5fd 45%, #c4b5fd); -webkit-background-clip: text; background-clip: text; color: transparent; }
