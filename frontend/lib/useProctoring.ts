@@ -8,10 +8,10 @@ const EMPTY: Status = { faces: null, flags: [], risk: 0, level: "low", calibrate
 const FRAME_EVERY_MS = 500; // 2 pictures per second is plenty
 
 /**
- * Watches the student while `active` is true:
+ * Watches the candidate while `active` is true:
  *  - sends a webcam picture to the Python AI twice a second
  *  - reports tab switches, leaving full screen, copy/paste, right-click
- * Returns the AI's latest verdict plus a list of warnings to show the student.
+ * Returns the AI's latest verdict plus a list of warnings to show the candidate.
  */
 export function useProctoring(sessionId: string, videoRef: RefObject<HTMLVideoElement | null>, active: boolean) {
   const [status, setStatus] = useState<Status>(EMPTY);

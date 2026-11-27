@@ -37,12 +37,12 @@ HOLD_SECONDS = {
 
 COOLDOWN_SECONDS = 15.0  # same problem can't be recorded again within this time
 
-# How far the student may turn from their normal pose (tweak to taste)
+# How far the candidate may turn from their normal pose (tweak to taste)
 YAW_LIMIT = 0.16
 PITCH_LIMIT = 0.18
 GAZE_LIMIT = 0.55
 
-CALIBRATION_FRAMES = 6  # first good frames are used to learn the student's "normal"
+CALIBRATION_FRAMES = 6  # first good frames are used to learn the candidate's "normal"
 
 
 def level_for(score: int) -> str:

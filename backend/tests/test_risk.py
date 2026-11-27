@@ -14,7 +14,7 @@ def calibrated_monitor():
     return m
 
 
-def test_normal_student_has_no_flags():
+def test_normal_candidate_has_no_flags():
     assert calibrated_monitor().flags_for(good()) == set()
 
 
@@ -36,10 +36,10 @@ def test_phone_flagged():
     assert "phone_detected" in calibrated_monitor().flags_for(good(objects=["phone"]))
 
 
-def test_calibration_learns_each_students_normal_pose():
+def test_calibration_learns_each_candidates_normal_pose():
     m = SessionMonitor()
     for _ in range(CALIBRATION_FRAMES):
-        m.flags_for(good(yaw=0.62))  # this student sits slightly off-centre
+        m.flags_for(good(yaw=0.62))  # this candidate sits slightly off-centre
     assert m.flags_for(good(yaw=0.62)) == set()
 
 
