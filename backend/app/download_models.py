@@ -1,14 +1,24 @@
-"""Downloads the two AI model files (about 11 MB) if they are missing."""
+"""Downloads the AI model files if they are missing (about 50 MB in total, once)."""
 import urllib.request
 
-from .config import FACE_MODEL, FACE_MODEL_URL, OBJECT_MODEL, OBJECT_MODEL_URL
+from .config import FACE_MODEL, FACE_MODEL_URL, OBJECT_MODEL, OBJECT_MODEL_URL, SFACE_MODEL, SFACE_MODEL_URL
+
+
+def _download(path, url) -> None:
+    if not path.exists():
+        print(f"Downloading {path.name} ...")
+        tmp = path.with_suffix(path.suffix + ".part")  # so a cut-off download is never mistaken for a model
+        urllib.request.urlretrieve(url, tmp)
+        tmp.replace(path)
 
 
 def ensure_models() -> None:
-    for path, url in ((FACE_MODEL, FACE_MODEL_URL), (OBJECT_MODEL, OBJECT_MODEL_URL)):
-        if not path.exists():
-            print(f"Downloading {path.name} ...")
-            urllib.request.urlretrieve(url, path)
+    _download(FACE_MODEL, FACE_MODEL_URL)
+    _download(OBJECT_MODEL, OBJECT_MODEL_URL)
+    try:
+        _download(SFACE_MODEL, SFACE_MODEL_URL)
+    except Exception as e:  # identity matching is optional; everything else still works
+        print(f"WARNING: could not download the face-matching model ({e}). Identity matching is switched off.")
 
 
 if __name__ == "__main__":

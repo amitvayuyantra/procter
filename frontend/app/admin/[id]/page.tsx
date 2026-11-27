@@ -65,14 +65,46 @@ export default function Review() {
       ) : (
         <>
           <section>
-            <h2 className="text-lg font-semibold">Identity check</h2>
-            <p className="text-sm text-slate-500">Photo taken when the interview started. Compare it with their ID or the video call.</p>
-            {idPhoto ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={img(idPhoto.evidence!)} alt="Candidate at start" className="mt-2 w-64 rounded-lg bg-slate-200" />
-            ) : (
-              <p className="mt-2 text-slate-500">No clear photo captured yet.</p>
-            )}
+            <h2 className="text-lg font-semibold">Identity &amp; liveness</h2>
+            <p className="text-sm text-slate-500">Compare the start-of-interview photo with the reference photo or the candidate&apos;s ID.</p>
+            <div className="mt-3 flex flex-wrap gap-4">
+              <figure>
+                {idPhoto ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={img(idPhoto.evidence!)} alt="Candidate at start" className="w-56 rounded-lg bg-slate-200" />
+                ) : (
+                  <div className="flex h-40 w-56 items-center justify-center rounded-lg bg-slate-100 text-sm text-slate-500">No clear photo yet</div>
+                )}
+                <figcaption className="mt-1 text-center text-sm text-slate-500">At interview start</figcaption>
+              </figure>
+              {data.has_reference && (
+                <figure>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={`${API}/api/admin/reference/${id}?key=${encodeURIComponent(key)}`} alt="Reference" className="w-56 rounded-lg bg-slate-200" />
+                  <figcaption className="mt-1 text-center text-sm text-slate-500">Reference photo</figcaption>
+                </figure>
+              )}
+            </div>
+            <ul className="mt-3 space-y-1 text-sm">
+              <li>
+                <b>Face match:</b>{" "}
+                {!data.has_reference ? (
+                  <span className="text-slate-500">no reference photo was provided</span>
+                ) : data.identity_score === null ? (
+                  <span className="text-slate-500">not measured yet</span>
+                ) : (
+                  <span className={`rounded-full px-2 py-0.5 font-semibold ${data.identity_label === "match" ? "bg-green-100 text-green-800" : data.identity_label === "uncertain" ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-800"}`}>
+                    {{ match: "Match", uncertain: "Uncertain, check by eye", mismatch: "Does not match" }[data.identity_label ?? "uncertain"]} ({data.identity_score.toFixed(2)})
+                  </span>
+                )}
+              </li>
+              <li>
+                <b>Head-turn liveness check:</b>{" "}
+                <span className={data.liveness === "passed" ? "text-green-700" : data.liveness === "failed" ? "font-semibold text-red-700" : "text-slate-500"}>
+                  {{ passed: "Passed", failed: "Not completed", not_run: "Not run" }[data.liveness]}
+                </span>
+              </li>
+            </ul>
           </section>
 
           <section>

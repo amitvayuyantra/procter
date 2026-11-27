@@ -7,9 +7,9 @@ Keeps remote **corporate interviews** honest using AI, and gives recruiters evid
 
 ## How it works
 
-1. **Recruiter** opens `/admin`, signs in with the admin key, and creates an interview (candidate, role, question set). This gives a private link to email to the candidate.
+1. **Recruiter** opens `/admin`, signs in with the admin key, and creates an interview (candidate, role, question set, and optionally a **reference photo**). This gives a private link to email to the candidate.
 2. **Candidate** opens the link, agrees to monitoring, allows the camera, and answers the questions in full screen. The timer starts when they press start.
-3. **AI watches** while they answer. It saves a start-of-interview photo for identity checking, and flags problems.
+3. **AI watches** while they answer. It saves a start-of-interview photo, checks it against the reference photo, runs a short head-turn liveness check, and keeps flagging problems.
 4. **Recruiter** opens the interview: ID photo, written answers, a timeline of flags with camera snapshots, and a verdict box (*Cleared / Needs follow-up / Concern confirmed*).
 
 ## What it flags
@@ -19,7 +19,13 @@ Keeps remote **corporate interviews** honest using AI, and gives recruiters evid
 | Face missing / someone else in the room | MediaPipe face landmarks + person detector |
 | Looking away (reading from another screen) | Nose position & eye direction, compared with the candidate's *own* normal pose |
 | Phone, book, extra laptop | EfficientDet object detector |
+| **Wrong person**: face doesn't match the reference photo | SFace face-recognition model (`backend/app/faceid.py`) compares "face fingerprints" |
+| **Person swap**: someone else takes over mid-interview | The candidate's face is re-checked about every 2 seconds against their own start-of-interview fingerprint |
+| **Photo / pre-recorded video instead of a live person** | Random head-turn challenge at the start ("turn to your left, then right"), plus a check for a feed with no blinking and no movement for 30 s |
+| **Camera covered or blocked**, dark room | Brightness analysis (a dark room only gets a hint to the candidate) |
 | Tab switch, leaving full screen, copy/paste, right-click | Browser events |
+
+The identity and liveness checks are secret: candidates see only a friendly "Quick check" prompt, and their browser never receives scores or flag details.
 
 Interview-friendly settings: candidates may glance away for about 6 seconds (thinking, notes) before it counts; a problem can't repeat for 15 s; and the start photo is **not** counted as a concern. **The AI only flags. A person decides, and nobody is rejected automatically.**
 
@@ -54,7 +60,7 @@ python run.py
 ```
 
 Open `backend/.env` and change `ADMIN_KEY` to your own password first.
-The two AI model files (~11 MB) download automatically on first start.
+The AI model files (~50 MB in total) download automatically on first start. The face-matching model is optional: if its download fails, everything else still works and face matching is switched off.
 (Linux only: if MediaPipe complains about libEGL, run `sudo apt install libegl1 libgles2`.)
 
 **2. Frontend** (same on every system)
@@ -83,7 +89,8 @@ cd backend && pytest
 ## Before using it on real candidates
 - **Get legal advice.** Camera monitoring of job applicants is regulated (for example GDPR in the EU, biometric rules in some US states). Tell candidates what you collect and for how long, offer an alternative to people who can't or won't be monitored, and delete snapshots after a set period.
 - Add real recruiter logins (one shared key is for demos), HTTPS, and a production database.
-- **Not covered yet:** matching the face to an ID document or detecting a *different person* taking over mid-interview (recruiters compare the start photo by eye), audio (someone whispering help), screen sharing, and live video calls with an interviewer.
+- **Not covered yet:** matching against an ID *document* (the recruiter supplies a reference photo instead), audio (someone whispering help), screen sharing, deepfake or virtual-camera detection (the head-turn check helps, but a live deepfake could still pass), and live video calls with an interviewer.
+- We deliberately do **not** include "emotion" or "lie detection". It is not scientifically reliable and risks unfair treatment of candidates.
 
 ## Limits
-Cameras, lighting and glasses affect accuracy. Head-turn and phone thresholds were set by reasoning, not tuned on real interview footage. Try them with your own people first.
+Cameras, lighting and glasses affect accuracy. Face matching was verified on photos (same person re-saved with changed lighting, blur and rotation scores 0.86 to 0.97; different people score about 0), not on thousands of real webcam sessions. Candidates with heavy glasses, strong lighting changes, or a big change in appearance since the reference photo may score lower, so a low score is a prompt for a human to look, not proof. The head-turn, still-picture and phone thresholds were set by reasoning, not tuned on real interview footage. Try them with your own people first.

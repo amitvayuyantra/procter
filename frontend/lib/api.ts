@@ -17,10 +17,18 @@ export type SessionRow = {
 };
 export type SessionDetail = SessionRow & {
   title: string; notes: string | null; events: ProctorEvent[]; qa: { question: string; answer: string }[];
+  has_reference: boolean; identity_score: number | null; identity_label: "match" | "uncertain" | "mismatch" | null;
+  liveness: "passed" | "failed" | "not_run";
 };
 
 export const EVENT_LABELS: Record<string, string> = {
   identity_check: "Start-of-interview photo (check identity)",
+  identity_mismatch: "Face does not match the reference photo",
+  different_person: "A different person appeared",
+  liveness_failed: "Did not complete the head-turn check",
+  liveness_passed: "Completed the head-turn check",
+  static_feed: "Camera shows a still picture / frozen video",
+  camera_blocked: "Camera blocked or covered",
   no_face: "Face not visible",
   multiple_faces: "More than one person",
   looking_away: "Looking away from screen",
@@ -48,6 +56,9 @@ export async function adminFetch<T>(path: string, key: string, init?: RequestIni
     headers: { "x-admin-key": key, ...(init?.body ? { "Content-Type": "application/json" } : {}) },
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(res.status === 401 ? "Wrong admin key" : `Error ${res.status}`);
+  if (!res.ok) {
+    const detail = await res.json().then((d) => d.detail).catch(() => null);
+    throw new Error(res.status === 401 ? "Wrong admin key" : typeof detail === "string" ? detail : `Error ${res.status}`);
+  }
   return res.json();
 }

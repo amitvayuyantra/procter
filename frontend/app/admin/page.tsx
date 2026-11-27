@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import RiskBadge from "@/components/RiskBadge";
 import { adminFetch, SessionRow, STATUS_LABELS, VERDICT_LABELS } from "@/lib/api";
+import { fileToJpegBase64 } from "@/lib/image";
 
 type Template = { key: string; title: string };
 
@@ -14,6 +15,8 @@ export default function Admin() {
   const [error, setError] = useState("");
 
   const [form, setForm] = useState({ candidate_name: "", candidate_email: "", position: "", template: "" });
+  const [photo, setPhoto] = useState<{ name: string; data: string } | null>(null);
+  const [busy, setBusy] = useState(false);
   const [link, setLink] = useState("");
   const [copied, setCopied] = useState(false);
 
@@ -51,8 +54,14 @@ export default function Admin() {
 
   async function invite(e: React.FormEvent) {
     e.preventDefault();
+    setBusy(true);
+    setError("");
     try {
-      const { session_id } = await adminFetch<{ session_id: string }>("/api/admin/invites", key, { method: "POST", body: JSON.stringify(form) });
+      const { session_id } = await adminFetch<{ session_id: string }>("/api/admin/invites", key, {
+        method: "POST",
+        body: JSON.stringify({ ...form, reference_photo: photo?.data ?? null }),
+      });
+      setPhoto(null);
       setLink(`${window.location.origin}/interview/${session_id}`);
       setCopied(false);
       setForm({ ...form, candidate_name: "", candidate_email: "", position: "" });
@@ -60,6 +69,7 @@ export default function Admin() {
     } catch (err) {
       setError((err as Error).message);
     }
+    setBusy(false);
   }
 
   if (!authed)
@@ -85,7 +95,18 @@ export default function Admin() {
           <select value={form.template} onChange={(e) => setForm({ ...form, template: e.target.value })} className="rounded-lg border p-2.5">
             {templates.map((t) => <option key={t.key} value={t.key}>{t.title}</option>)}
           </select>
-          <button className="rounded-lg bg-indigo-600 py-2.5 font-semibold text-white sm:col-span-2">Create interview link</button>
+          <label className="rounded-lg border border-dashed p-2.5 text-sm text-slate-600 sm:col-span-2">
+            Reference photo (optional): the AI will check the candidate's face matches it
+            <input type="file" accept="image/*" className="mt-1 block text-sm"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                setPhoto(f ? { name: f.name, data: await fileToJpegBase64(f) } : null);
+              }} />
+            {photo && <span className="text-green-700">✓ {photo.name} attached</span>}
+          </label>
+          <button disabled={busy} className="rounded-lg bg-indigo-600 py-2.5 font-semibold text-white disabled:opacity-50 sm:col-span-2">
+            {busy ? "Checking photo…" : "Create interview link"}
+          </button>
         </form>
         {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
         {link && (

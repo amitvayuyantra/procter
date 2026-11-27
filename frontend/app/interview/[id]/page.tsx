@@ -14,6 +14,8 @@ const HINTS: Record<string, string> = {
   phone_detected: "A phone is visible. Please put it away.",
   book_detected: "A book is visible. Please remove it.",
   laptop_detected: "Another laptop is visible. Please remove it.",
+  camera_blocked: "Your camera looks blocked or covered.",
+  low_light: "Your room is quite dark. Please add some light in front of you.",
 };
 
 const draftKey = (id: string) => `interview-draft-${id}`;
@@ -149,6 +151,25 @@ export default function InterviewPage() {
 
   return (
     <main className="mx-auto grid max-w-5xl gap-6 p-6 md:grid-cols-[1fr_260px]">
+      {status.challenge === "active" && (
+        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/70 p-6">
+          <div className="max-w-md rounded-2xl bg-white p-6 text-center shadow-xl">
+            <h2 className="text-xl font-bold">Quick check</h2>
+            <p className="mt-2 text-slate-600">
+              Please slowly turn your head to your <b>{status.challengeFirst}</b>, then to your{" "}
+              <b>{status.challengeFirst === "left" ? "right" : "left"}</b>, then look back at the screen.
+            </p>
+            <div className="mt-4 flex justify-center gap-3 text-sm">
+              {[1, 2].map((n) => (
+                <span key={n} className={`rounded-full px-3 py-1 ${status.challengeProgress >= n ? "bg-green-100 text-green-800" : "bg-slate-100 text-slate-500"}`}>
+                  {status.challengeProgress >= n ? "✓" : "○"} Step {n}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {warning && (
         <div className="fixed inset-x-0 top-0 z-10 bg-amber-500 p-3 text-center font-semibold text-white">
           ⚠ Noted: {warning}

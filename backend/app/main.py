@@ -1,20 +1,23 @@
 import asyncio
+import base64
+import binascii
 import hmac
 import json
 import time
 from contextlib import asynccontextmanager
 from typing import Literal
 
+import numpy as np
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from . import db
-from .config import ADMIN_KEY, CORS_ORIGINS, EVIDENCE_DIR
+from .config import ADMIN_KEY, CORS_ORIGINS, EVIDENCE_DIR, REFERENCE_DIR
 from .interviews import get_template, list_templates
-from .risk import POINTS, SessionMonitor, level_for
-from .vision import FrameAnalyzer
+from .risk import POINTS, SessionMonitor, identity_label, level_for
+from .vision import FrameAnalyzer, normalize_image
 
 analyzer: FrameAnalyzer | None = None
 monitors: dict[str, SessionMonitor] = {}
@@ -37,8 +40,14 @@ app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["*
 
 BROWSER_EVENTS = {"tab_hidden", "window_blur", "fullscreen_exit", "copy_paste", "right_click"}
 # Only these events get a camera snapshot saved as evidence
-SNAPSHOT_EVENTS = {"identity_check", "no_face", "multiple_faces", "looking_away", "phone_detected",
+SNAPSHOT_EVENTS = {"identity_check", "identity_mismatch", "different_person", "liveness_passed", "liveness_failed",
+                   "static_feed", "camera_blocked", "no_face", "multiple_faces", "looking_away", "phone_detected",
                    "book_detected", "laptop_detected", "tab_hidden", "copy_paste"}
+# What the candidate's screen may show. The identity / liveness checks stay secret so they can't be gamed.
+SILENT_EVENTS = {"identity_check", "identity_mismatch", "different_person", "liveness_passed", "liveness_failed",
+                 "static_feed"}
+HINT_FLAGS = {"no_face", "multiple_faces", "looking_away", "phone_detected", "book_detected", "laptop_detected",
+              "camera_blocked", "low_light"}
 
 
 def require_admin(x_admin_key: str | None = Header(default=None), key: str | None = Query(default=None)) -> None:
@@ -113,13 +122,15 @@ def record(sid: str, kind: str, detail: str = "") -> dict:
 
 
 def status(mon: SessionMonitor, faces: int, flags: set[str], new_events: list[dict]) -> dict:
+    """What the candidate's browser is told. Scores and secret checks are deliberately left out."""
     return {
         "faces": faces,
-        "flags": sorted(flags),
-        "risk": mon.risk,
-        "level": level_for(mon.risk),
+        "flags": sorted(flags & HINT_FLAGS),
         "calibrated": mon.calibrated,
-        "new_events": [{"type": e["type"], "points": e["points"]} for e in new_events],
+        "challenge": mon.challenge,
+        "challenge_first": mon.challenge_first,
+        "challenge_progress": mon.challenge_progress,
+        "new_events": [{"type": e["type"], "points": e["points"]} for e in new_events if e["type"] not in SILENT_EVENTS],
     }
 
 
@@ -132,6 +143,8 @@ async def proctor_socket(ws: WebSocket, sid: str):
     await ws.accept()
     mon = monitors.setdefault(sid, SessionMonitor())
     mon.risk = db.risk_score(sid)
+    if mon.reference is None and session["reference_embedding"]:
+        mon.reference = np.array(session["reference_embedding"], dtype=np.float32)
 
     try:
         while True:
@@ -144,15 +157,17 @@ async def proctor_socket(ws: WebSocket, sid: str):
 
             if msg.get("bytes"):  # a webcam picture
                 mon.last_frame = msg["bytes"]
-                was_calibrated = mon.calibrated
-                result = await asyncio.to_thread(analyzer.analyze, msg["bytes"])
+                now = clock()
+                result = await asyncio.to_thread(analyzer.analyze, msg["bytes"], mon.wants_embedding())
                 if result:
                     faces = result.faces
-                    flags = mon.flags_for(result)
-                    if mon.calibrated and not was_calibrated:
-                        # First clear, single-face view of the candidate: keep it for ID checking
-                        new_events.append(record(sid, "identity_check", "Start-of-interview photo"))
-                    for kind in mon.due_events(flags, clock()):
+                    flags, one_offs = mon.process(result, now)
+                    for kind, detail in one_offs:
+                        new_events.append(record(sid, kind, detail))
+                    if mon.identity_score is not None and not mon.identity_saved:
+                        db.set_identity_score(sid, mon.identity_score)
+                        mon.identity_saved = True
+                    for kind in mon.due_events(flags, now):
                         new_events.append(record(sid, kind))
             elif msg.get("text"):  # a browser event (tab switch, copy, ...)
                 data = json.loads(msg["text"])
@@ -171,6 +186,7 @@ class InviteBody(BaseModel):
     candidate_email: str = Field(min_length=3, max_length=200)
     position: str = Field(min_length=1, max_length=100)
     template: str
+    reference_photo: str | None = Field(default=None, max_length=6_000_000)  # optional, base64 image
 
 
 class ReviewBody(BaseModel):
@@ -187,7 +203,24 @@ def admin_templates():
 def create_invite(body: InviteBody):
     if not get_template(body.template):
         raise HTTPException(400, "Unknown interview template")
-    sid = db.create_session(body.candidate_name.strip(), body.candidate_email.strip(), body.position.strip(), body.template)
+
+    embedding, photo = None, None
+    if body.reference_photo:
+        try:
+            raw = base64.b64decode(body.reference_photo.split(",")[-1], validate=True)  # also accepts "data:image/...;base64,..."
+        except (binascii.Error, ValueError):
+            raise HTTPException(400, "The reference photo could not be read.")
+        photo = normalize_image(raw)
+        if photo is None:
+            raise HTTPException(400, "That file is not a valid image.")
+        embedding, problem = analyzer.reference_embedding(photo)
+        if embedding is None:
+            raise HTTPException(400, problem)
+
+    sid = db.create_session(body.candidate_name.strip(), body.candidate_email.strip(), body.position.strip(),
+                            body.template, embedding.tolist() if embedding is not None else None)
+    if photo:
+        (REFERENCE_DIR / f"{sid}.jpg").write_bytes(photo)
     return {"session_id": sid}
 
 
@@ -207,8 +240,13 @@ def admin_session(sid: str):
     template = get_template(session["template"])
     risk = db.risk_score(sid)
     answers = session.pop("answers")
+    has_reference = session.pop("reference_embedding") is not None
+    kinds = {e["type"] for e in db.list_events(sid)}
     return {
         **session,
+        "has_reference": has_reference,
+        "identity_label": identity_label(session["identity_score"]),
+        "liveness": "passed" if "liveness_passed" in kinds else "failed" if "liveness_failed" in kinds else "not_run",
         "title": template["title"],
         "risk": risk,
         "level": level_for(risk),
@@ -229,5 +267,13 @@ def review(sid: str, body: ReviewBody):
 def evidence(sid: str, name: str):
     path = (EVIDENCE_DIR / sid / name).resolve()
     if EVIDENCE_DIR.resolve() not in path.parents or not path.is_file():  # block ../ tricks
+        raise HTTPException(404)
+    return FileResponse(path, media_type="image/jpeg")
+
+
+@app.get("/api/admin/reference/{sid}", dependencies=[Depends(require_admin)])
+def reference_photo(sid: str):
+    path = REFERENCE_DIR / f"{sid}.jpg"
+    if not db.get_session(sid) or not path.is_file():  # the id must exist in the database, so no ../ tricks
         raise HTTPException(404)
     return FileResponse(path, media_type="image/jpeg")

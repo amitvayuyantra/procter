@@ -15,7 +15,7 @@ _conn.executescript(
     CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY, candidate_name TEXT, candidate_email TEXT, position TEXT, template TEXT,
         created_at REAL, started_at REAL, finished_at REAL, answers TEXT,
-        verdict TEXT, notes TEXT
+        verdict TEXT, notes TEXT, reference_embedding TEXT, identity_score REAL
     );
     CREATE TABLE IF NOT EXISTS events (
         id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, type TEXT,
@@ -24,6 +24,13 @@ _conn.executescript(
     CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
     """
 )
+
+# Upgrade databases created by older versions
+_have = {r["name"] for r in _conn.execute("PRAGMA table_info(sessions)")}
+for _col, _type in (("reference_embedding", "TEXT"), ("identity_score", "REAL")):
+    if _col not in _have:
+        _conn.execute(f"ALTER TABLE sessions ADD COLUMN {_col} {_type}")
+_conn.commit()
 
 
 def _all(sql: str, args: tuple = ()) -> list[dict]:
@@ -35,12 +42,13 @@ def status_of(row: dict) -> str:
     return "completed" if row["finished_at"] else "in_progress" if row["started_at"] else "invited"
 
 
-def create_session(name: str, email: str, position: str, template: str) -> str:
+def create_session(name: str, email: str, position: str, template: str, reference_embedding: list[float] | None = None) -> str:
     sid = secrets.token_urlsafe(9)  # hard to guess: this is the candidate's private link
     with _lock, _conn:
         _conn.execute(
-            "INSERT INTO sessions (id, candidate_name, candidate_email, position, template, created_at) VALUES (?,?,?,?,?,?)",
-            (sid, name, email, position, template, time.time()),
+            "INSERT INTO sessions (id, candidate_name, candidate_email, position, template, created_at, reference_embedding)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (sid, name, email, position, template, time.time(), json.dumps(reference_embedding) if reference_embedding else None),
         )
     return sid
 
@@ -51,6 +59,7 @@ def get_session(sid: str) -> dict | None:
         return None
     row = rows[0]
     row["answers"] = json.loads(row["answers"]) if row["answers"] else {}
+    row["reference_embedding"] = json.loads(row["reference_embedding"]) if row["reference_embedding"] else None
     row["status"] = status_of(row)
     return row
 
@@ -64,6 +73,11 @@ def start_session(sid: str) -> None:
 def finish_session(sid: str, answers: dict[str, str]) -> None:
     with _lock, _conn:
         _conn.execute("UPDATE sessions SET finished_at=?, answers=? WHERE id=?", (time.time(), json.dumps(answers), sid))
+
+
+def set_identity_score(sid: str, score: float) -> None:
+    with _lock, _conn:
+        _conn.execute("UPDATE sessions SET identity_score=? WHERE id=?", (score, sid))
 
 
 def set_review(sid: str, verdict: str, notes: str) -> None:

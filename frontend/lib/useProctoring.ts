@@ -1,9 +1,12 @@
 "use client";
 import { RefObject, useCallback, useEffect, useRef, useState } from "react";
-import { EVENT_LABELS, Level, WS } from "./api";
+import { EVENT_LABELS, WS } from "./api";
 
-export type Status = { faces: number | null; flags: string[]; risk: number; level: Level; calibrated: boolean };
-const EMPTY: Status = { faces: null, flags: [], risk: 0, level: "low", calibrated: false };
+export type Status = {
+  faces: number | null; flags: string[]; calibrated: boolean;
+  challenge: "waiting" | "active" | "passed" | "failed"; challengeFirst: "left" | "right"; challengeProgress: number;
+};
+const EMPTY: Status = { faces: null, flags: [], calibrated: false, challenge: "waiting", challengeFirst: "left", challengeProgress: 0 };
 
 const FRAME_EVERY_MS = 500; // 2 pictures per second is plenty
 
@@ -42,7 +45,10 @@ export function useProctoring(sessionId: string, videoRef: RefObject<HTMLVideoEl
       ws.onmessage = (m) => {
         waiting = false;
         const d = JSON.parse(m.data);
-        setStatus({ faces: d.faces, flags: d.flags, risk: d.risk, level: d.level, calibrated: d.calibrated });
+        setStatus({
+          faces: d.faces, flags: d.flags, calibrated: d.calibrated,
+          challenge: d.challenge, challengeFirst: d.challenge_first, challengeProgress: d.challenge_progress,
+        });
         const concern = d.new_events?.find((e: { points: number }) => e.points > 0); // not the ID photo
         if (concern) {
           setWarning(EVENT_LABELS[concern.type] ?? "Unusual activity");
