@@ -11,6 +11,7 @@ from mediapipe.tasks.python import vision
 from .config import FACE_MODEL, OBJECT_MODEL, SFACE_MODEL
 from .download_models import ensure_models
 from .faceid import FaceEmbedder
+from .mesh import MESH_POINTS
 
 # Things a candidate should not have next to them
 WATCHED_OBJECTS = {"cell phone": "phone", "book": "book", "laptop": "laptop"}
@@ -36,6 +37,10 @@ class FrameResult:
     brightness: float = 128.0  # 0 = black picture, 255 = white
     thumb: np.ndarray | None = None  # tiny grey copy of the picture, to spot a frozen feed
     embedding: np.ndarray | None = None  # "face fingerprint" (only when asked for)
+    # For drawing on the candidate's camera view (all positions are 0-1000 across the picture)
+    mesh: list[list[int]] | None = None  # the main face's key points, in MESH_POINTS order
+    other_faces: list[list[int]] = field(default_factory=list)  # [x, y, width, height] of extra faces
+    boxes: list[dict] = field(default_factory=list)  # watched objects: {"label", "box": [x, y, width, height]}
 
 
 def normalize_image(data: bytes, longest_side: int = 800) -> bytes | None:
@@ -131,9 +136,19 @@ class FrameAnalyzer:
                     result.persons += 1
             elif name in WATCHED_OBJECTS:
                 result.objects.append(WATCHED_OBJECTS[name])
+                b = det.bounding_box
+                result.boxes.append({"label": WATCHED_OBJECTS[name], "box": [
+                    round(b.origin_x / w * 1000), round(b.origin_y / h * 1000),
+                    round(b.width / w * 1000), round(b.height / h * 1000)]})
+
+        for other in face_out.face_landmarks[1:]:
+            xs, ys = [p.x for p in other], [p.y for p in other]
+            result.other_faces.append([round(min(xs) * 1000), round(min(ys) * 1000),
+                                       round((max(xs) - min(xs)) * 1000), round((max(ys) - min(ys)) * 1000)])
 
         if result.faces:
             lm = face_out.face_landmarks[0]  # the biggest / most confident face
+            result.mesh = [[round(lm[i].x * 1000), round(lm[i].y * 1000)] for i in MESH_POINTS]
             width = lm[RIGHT_EDGE].x - lm[LEFT_EDGE].x
             height = lm[CHIN].y - lm[BETWEEN_EYES].y
             if width > 1e-4 and height > 1e-4:

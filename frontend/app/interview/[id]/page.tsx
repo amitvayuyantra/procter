@@ -2,6 +2,7 @@
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { API, Interview } from "@/lib/api";
+import CameraHud from "@/components/CameraHud";
 import { useProctoring } from "@/lib/useProctoring";
 
 type Stage = "loading" | "welcome" | "interview" | "done" | "notfound";
@@ -36,7 +37,7 @@ export default function InterviewPage() {
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [error, setError] = useState("");
 
-  const { status, connected, warning } = useProctoring(id, videoRef, stage === "interview");
+  const { status, connected, warning, hudRef } = useProctoring(id, videoRef, stage === "interview");
 
   useEffect(() => {
     fetch(`${API}/api/interviews/${id}`)
@@ -148,28 +149,10 @@ export default function InterviewPage() {
   const mm = String(Math.floor(secondsLeft / 60)).padStart(2, "0");
   const ss = String(secondsLeft % 60).padStart(2, "0");
   const liveHints = status.flags.map((f) => HINTS[f]).filter(Boolean);
+  const checking = status.challenge === "active";
 
   return (
-    <main className="mx-auto grid max-w-5xl gap-6 p-6 md:grid-cols-[1fr_260px]">
-      {status.challenge === "active" && (
-        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/70 p-6">
-          <div className="max-w-md rounded-2xl bg-white p-6 text-center shadow-xl">
-            <h2 className="text-xl font-bold">Quick check</h2>
-            <p className="mt-2 text-slate-600">
-              Please slowly turn your head to your <b>{status.challengeFirst}</b>, then to your{" "}
-              <b>{status.challengeFirst === "left" ? "right" : "left"}</b>, then look back at the screen.
-            </p>
-            <div className="mt-4 flex justify-center gap-3 text-sm">
-              {[1, 2].map((n) => (
-                <span key={n} className={`rounded-full px-3 py-1 ${status.challengeProgress >= n ? "bg-green-100 text-green-800" : "bg-slate-100 text-slate-500"}`}>
-                  {status.challengeProgress >= n ? "✓" : "○"} Step {n}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
+    <main className="mx-auto grid max-w-6xl gap-6 p-6 md:grid-cols-[1fr_340px]">
       {warning && (
         <div className="fixed inset-x-0 top-0 z-10 bg-amber-500 p-3 text-center font-semibold text-white">
           ⚠ Noted: {warning}
@@ -202,10 +185,19 @@ export default function InterviewPage() {
       </section>
 
       <aside className="space-y-3 md:sticky md:top-6 md:self-start">
-        <video ref={videoRef} autoPlay muted playsInline className="w-full -scale-x-100 rounded-xl bg-black" />
-        <div className="flex items-center gap-2 text-sm">
-          <span className={`h-2.5 w-2.5 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`} />
-          {connected ? (status.calibrated ? "Monitoring active" : "Getting ready… look at the screen") : "Reconnecting…"}
+        {/* While the head-turn check runs, the camera moves to the middle of a dimmed screen so the arrows are easy to follow */}
+        <div className={checking ? "fixed inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-slate-950/85 p-4 backdrop-blur-sm" : ""}>
+          <div className={checking ? "w-[min(92vw,540px)]" : ""}>
+            <CameraHud hudRef={hudRef} status={status} connected={connected}>
+              <video ref={videoRef} autoPlay muted playsInline className="h-full w-full -scale-x-100 object-cover" />
+            </CameraHud>
+          </div>
+          {checking && (
+            <p className="max-w-md text-center text-white">
+              <b className="text-lg">Quick check.</b> Slowly turn your head to your <b>{status.challengeFirst}</b>, then to
+              your <b>{status.challengeFirst === "left" ? "right" : "left"}</b>, then look back at the screen.
+            </p>
+          )}
         </div>
         {liveHints.map((h) => (
           <p key={h} className="rounded-lg bg-amber-100 p-2 text-sm text-amber-900">{h}</p>

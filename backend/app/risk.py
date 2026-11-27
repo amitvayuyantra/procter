@@ -120,6 +120,27 @@ class SessionMonitor:
     _prev_thumb: np.ndarray | None = None
     _samples: deque = field(default_factory=deque)
 
+    # -- states shown on the candidate's camera view (words only, never scores) --
+    @property
+    def identity_state(self) -> str:
+        if not self.calibrated:
+            return "scanning"
+        if self.session_embedding is None:
+            return "off"  # face matching not available
+        if (self.identity_score is not None and self.identity_score < MISMATCH_THRESHOLD) or self._low_sim >= SWAP_CHECKS:
+            return "review"
+        return "verified" if self.reference is not None else "locked"
+
+    @property
+    def feed_state(self) -> str:
+        return "review" if self._static else "live"
+
+    def pose_fractions(self, r: FrameResult) -> tuple[float, float] | None:
+        """How far the head is from the candidate's normal pose. 1.0 means "at the edge of the allowed range"."""
+        if not self.calibrated or r.yaw is None or r.pitch is None:
+            return None
+        return (r.yaw - self.baseline_yaw) / YAW_LIMIT, (r.pitch - self.baseline_pitch) / PITCH_LIMIT
+
     # -- the one call per camera picture ---------------------------------
     def wants_embedding(self) -> bool:
         """Ask once per picture: should the (slower) face fingerprint be computed for it?"""

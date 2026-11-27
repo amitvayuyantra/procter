@@ -25,7 +25,21 @@ Keeps remote **corporate interviews** honest using AI, and gives recruiters evid
 | **Camera covered or blocked**, dark room | Brightness analysis (a dark room only gets a hint to the candidate) |
 | Tab switch, leaving full screen, copy/paste, right-click | Browser events |
 
-The identity and liveness checks are secret: candidates see only a friendly "Quick check" prompt, and their browser never receives scores or flag details.
+## What the candidate sees on the camera
+
+The candidate's camera panel is a live "AI vision" view (preview it without a webcam at `/demo`):
+
+- a glowing **face mesh** with a tracking frame that locks onto the face, and a light beam that scans it
+- **gaze arrows** from each eye, and the eyes flash when they **blink**
+- a **head-pose dial**: your head is the dot, the dashed circle is the allowed range
+- animated **boxes around phones, books, laptops and extra people**
+- an **identity scan** ring that turns into "Identity verified" (or a neutral "Under review")
+- the **head-turn challenge**: the camera comes to the centre of the screen with flowing arrows showing which way to turn
+- a **live-feed pulse line** (it goes flat if the feed looks frozen), a light meter, a blink counter, and a **camera blocked** alert
+- a 9-item checklist under the camera (face, head, gaze, objects, identity, liveness, feed, camera, screen)
+
+Candidates see each check's *state* in words, but never scores or thresholds: the server only sends face-point positions and one-word states. A candidate who inspects the network traffic finds nothing to tune a cheat against. Respects "reduce motion" settings.
+
 
 Interview-friendly settings: candidates may glance away for about 6 seconds (thinking, notes) before it counts; a problem can't repeat for 15 s; and the start photo is **not** counted as a concern. **The AI only flags. A person decides, and nobody is rejected automatically.**
 

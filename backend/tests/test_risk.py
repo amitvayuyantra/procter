@@ -191,3 +191,23 @@ def test_a_blink_or_head_sway_proves_a_live_person():
         flags, _ = m2.process(good(yaw=0.5 + 0.015 * (i % 2), thumb=STILL), t2)
         t2 += 0.5
     assert "static_feed" not in flags
+
+
+def test_identity_state_shown_on_camera():
+    assert SessionMonitor().identity_state == "scanning"
+    assert start_interview(face=V)[0].identity_state == "locked"  # no reference: face is simply locked for tracking
+    assert start_interview(reference=V, face=V)[0].identity_state == "verified"
+    assert start_interview(reference=V, face=W)[0].identity_state == "review"
+    m, _, t = start_interview(face=V)
+    _, t = pass_head_turn(m, t)
+    for i in range(SWAP_CHECKS):
+        m.process(good(embedding=W), t + i)
+    assert m.identity_state == "review"
+
+
+def test_pose_fractions_are_relative_to_the_candidates_own_normal():
+    m = calibrated_monitor()
+    assert m.pose_fractions(good()) == (0.0, 0.0)
+    yaw, _ = m.pose_fractions(good(yaw=0.5 + 0.16))
+    assert abs(yaw - 1.0) < 1e-6  # exactly at the edge of the allowed range
+    assert SessionMonitor().pose_fractions(good()) is None  # not calibrated yet

@@ -1,14 +1,11 @@
 "use client";
 import { RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { EVENT_LABELS, WS } from "./api";
+import { EMPTY_FRAME, HudFrame } from "./hud";
 
-export type Status = {
-  faces: number | null; flags: string[]; calibrated: boolean;
-  challenge: "waiting" | "active" | "passed" | "failed"; challengeFirst: "left" | "right"; challengeProgress: number;
-};
-const EMPTY: Status = { faces: null, flags: [], calibrated: false, challenge: "waiting", challengeFirst: "left", challengeProgress: 0 };
+export type Status = HudFrame;
 
-const FRAME_EVERY_MS = 500; // 2 pictures per second is plenty
+const FRAME_EVERY_MS = 330; // about 3 pictures per second: smooth enough for the camera animation, light on the server
 
 /**
  * Watches the candidate while `active` is true:
@@ -17,10 +14,12 @@ const FRAME_EVERY_MS = 500; // 2 pictures per second is plenty
  * Returns the AI's latest verdict plus a list of warnings to show the candidate.
  */
 export function useProctoring(sessionId: string, videoRef: RefObject<HTMLVideoElement | null>, active: boolean) {
-  const [status, setStatus] = useState<Status>(EMPTY);
+  const [status, setStatus] = useState<Status>(EMPTY_FRAME);
   const [connected, setConnected] = useState(false);
   const [warning, setWarning] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const hudRef = useRef<HudFrame | null>(null); // latest picture results, read 60 times a second by the camera animation
+  const seq = useRef(0);
 
   const sendEvent = useCallback((event: string) => {
     const ws = wsRef.current;
@@ -45,10 +44,12 @@ export function useProctoring(sessionId: string, videoRef: RefObject<HTMLVideoEl
       ws.onmessage = (m) => {
         waiting = false;
         const d = JSON.parse(m.data);
-        setStatus({
-          faces: d.faces, flags: d.flags, calibrated: d.calibrated,
+        const next: HudFrame = {
+          seq: ++seq.current, faces: d.faces, hud: d.hud, flags: d.flags, checks: d.checks, calibrated: d.calibrated,
           challenge: d.challenge, challengeFirst: d.challenge_first, challengeProgress: d.challenge_progress,
-        });
+        };
+        hudRef.current = next;
+        setStatus(next);
         const concern = d.new_events?.find((e: { points: number }) => e.points > 0); // not the ID photo
         if (concern) {
           setWarning(EVENT_LABELS[concern.type] ?? "Unusual activity");
@@ -104,5 +105,5 @@ export function useProctoring(sessionId: string, videoRef: RefObject<HTMLVideoEl
     };
   }, [active, sendEvent]);
 
-  return { status, connected, warning };
+  return { status, connected, warning, hudRef };
 }

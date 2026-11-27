@@ -12,6 +12,7 @@ from starlette.websockets import WebSocketDisconnect
 os.environ["ADMIN_KEY"] = "test-key"
 
 from app import db, main  # noqa: E402
+from app.mesh import MESH_POINTS  # noqa: E402
 from app.risk import CALIBRATION_FRAMES  # noqa: E402
 from app.vision import FrameResult  # noqa: E402
 
@@ -88,8 +89,9 @@ def test_full_flow(client, monkeypatch, fast_clock):
             for _ in range(CALIBRATION_FRAMES):
                 reply = send(ws)
             assert reply["calibrated"] and reply["challenge"] == "active"
-            assert set(reply) == {"faces", "flags", "calibrated", "challenge", "challenge_first",
+            assert set(reply) == {"faces", "hud", "checks", "flags", "calibrated", "challenge", "challenge_first",
                                   "challenge_progress", "new_events"}  # no scores leak to the candidate
+            assert reply["checks"] == {"identity": "off", "feed": "live"} and reply["hud"]["pose"] == [0.0, 0.0]
             assert turn_head(ws, cam, reply)["challenge"] == "passed"
 
         events = [e for _ in range(4) for e in send(ws)["new_events"]]  # empty room
@@ -156,9 +158,11 @@ def test_same_face_matches_reference_photo(client):
     client.post(f"/api/interviews/{sid}/start")
     with client.websocket_connect(f"/ws/sessions/{sid}") as ws:
         for _ in range(CALIBRATION_FRAMES + 2):
-            send(ws, FACE)  # the "camera" shows the same face, re-compressed
+            reply = send(ws, FACE)  # the "camera" shows the same face, re-compressed
     detail = admin_view(client, sid)
     assert detail["has_reference"] and detail["identity_label"] == "match" and detail["identity_score"] > 0.8
+    assert reply["checks"]["identity"] == "verified"  # the candidate sees a word, never the score
+    assert len(reply["hud"]["mesh"]) == len(MESH_POINTS) and all(0 <= v <= 1000 for p in reply["hud"]["mesh"] for v in p)
     assert "identity_mismatch" not in [e["type"] for e in detail["events"]]
 
 

@@ -9,6 +9,7 @@ export default function Home() {
       </p>
       <p className="mt-6">
         <Link href="/admin" className="rounded-lg bg-indigo-600 px-5 py-2.5 font-semibold text-white">Recruiter dashboard</Link>
+        <Link href="/demo" className="ml-3 rounded-lg border border-slate-300 px-5 py-2.5 font-semibold text-slate-700">See the AI vision demo</Link>
       </p>
     </main>
   );

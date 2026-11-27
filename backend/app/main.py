@@ -16,8 +16,8 @@ from pydantic import BaseModel, Field
 from . import db
 from .config import ADMIN_KEY, CORS_ORIGINS, EVIDENCE_DIR, REFERENCE_DIR
 from .interviews import get_template, list_templates
-from .risk import POINTS, SessionMonitor, identity_label, level_for
-from .vision import FrameAnalyzer, normalize_image
+from .risk import GAZE_LIMIT, POINTS, SessionMonitor, identity_label, level_for
+from .vision import FrameAnalyzer, FrameResult, normalize_image
 
 analyzer: FrameAnalyzer | None = None
 monitors: dict[str, SessionMonitor] = {}
@@ -43,7 +43,8 @@ BROWSER_EVENTS = {"tab_hidden", "window_blur", "fullscreen_exit", "copy_paste", 
 SNAPSHOT_EVENTS = {"identity_check", "identity_mismatch", "different_person", "liveness_passed", "liveness_failed",
                    "static_feed", "camera_blocked", "no_face", "multiple_faces", "looking_away", "phone_detected",
                    "book_detected", "laptop_detected", "tab_hidden", "copy_paste"}
-# What the candidate's screen may show. The identity / liveness checks stay secret so they can't be gamed.
+# Warning banners the candidate may see. Identity / liveness problems are not announced as warnings
+# (the camera view only shows a neutral "under review" state), and no scores are ever sent.
 SILENT_EVENTS = {"identity_check", "identity_mismatch", "different_person", "liveness_passed", "liveness_failed",
                  "static_feed"}
 HINT_FLAGS = {"no_face", "multiple_faces", "looking_away", "phone_detected", "book_detected", "laptop_detected",
@@ -121,10 +122,27 @@ def record(sid: str, kind: str, detail: str = "") -> dict:
     return event
 
 
-def status(mon: SessionMonitor, faces: int, flags: set[str], new_events: list[dict]) -> dict:
-    """What the candidate's browser is told. Scores and secret checks are deliberately left out."""
+def hud_for(r: FrameResult, mon: SessionMonitor) -> dict:
+    """Everything the browser needs to draw the live AI view on the camera. Positions only, no scores."""
+    pose = mon.pose_fractions(r)
+    return {
+        "mesh": r.mesh,
+        "others": r.other_faces,
+        "boxes": r.boxes,
+        "pose": [round(pose[0], 2), round(pose[1], 2)] if pose else None,
+        "head_away": bool(pose and (abs(pose[0]) > 1 or abs(pose[1]) > 1)),
+        "gaze_away": r.gaze_side > GAZE_LIMIT,
+        "blink": r.blink,
+        "light": round(r.brightness / 2.55),
+    }
+
+
+def status(mon: SessionMonitor, faces: int, flags: set[str], new_events: list[dict], hud: dict | None) -> dict:
+    """What the candidate's browser is told. Scores and details of the checks are deliberately left out."""
     return {
         "faces": faces,
+        "hud": hud,
+        "checks": {"identity": mon.identity_state, "feed": mon.feed_state},
         "flags": sorted(flags & HINT_FLAGS),
         "calibrated": mon.calibrated,
         "challenge": mon.challenge,
@@ -146,14 +164,13 @@ async def proctor_socket(ws: WebSocket, sid: str):
     if mon.reference is None and session["reference_embedding"]:
         mon.reference = np.array(session["reference_embedding"], dtype=np.float32)
 
+    faces, flags, hud = 0, set(), None  # the latest camera picture's results (kept for browser-event replies)
     try:
         while True:
             msg = await ws.receive()
             if msg["type"] == "websocket.disconnect":
                 break
             new_events: list[dict] = []
-            flags: set[str] = set()
-            faces = 0
 
             if msg.get("bytes"):  # a webcam picture
                 mon.last_frame = msg["bytes"]
@@ -162,6 +179,7 @@ async def proctor_socket(ws: WebSocket, sid: str):
                 if result:
                     faces = result.faces
                     flags, one_offs = mon.process(result, now)
+                    hud = hud_for(result, mon)
                     for kind, detail in one_offs:
                         new_events.append(record(sid, kind, detail))
                     if mon.identity_score is not None and not mon.identity_saved:
@@ -175,7 +193,7 @@ async def proctor_socket(ws: WebSocket, sid: str):
                 if kind in BROWSER_EVENTS and mon.browser_event_allowed(kind, clock()):
                     new_events.append(record(sid, kind, str(data.get("detail", ""))[:200]))
 
-            await ws.send_json(status(mon, faces, flags, new_events))
+            await ws.send_json(status(mon, faces, flags, new_events, hud))
     except WebSocketDisconnect:
         pass
 
