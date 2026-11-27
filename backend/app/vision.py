@@ -32,19 +32,21 @@ class FrameResult:
 
 
 class FrameAnalyzer:
+    # Models are loaded from memory (not by file path) so Windows folders with
+    # accented / non-English characters in the user name can't break loading.
     def __init__(self) -> None:
         ensure_models()
         self._lock = threading.Lock()  # the AI models handle one picture at a time
         self._face = vision.FaceLandmarker.create_from_options(
             vision.FaceLandmarkerOptions(
-                base_options=mp_python.BaseOptions(model_asset_path=str(FACE_MODEL)),
+                base_options=mp_python.BaseOptions(model_asset_buffer=FACE_MODEL.read_bytes()),
                 num_faces=3,
                 output_face_blendshapes=True,
             )
         )
         self._objects = vision.ObjectDetector.create_from_options(
             vision.ObjectDetectorOptions(
-                base_options=mp_python.BaseOptions(model_asset_path=str(OBJECT_MODEL)),
+                base_options=mp_python.BaseOptions(model_asset_buffer=OBJECT_MODEL.read_bytes()),
                 score_threshold=0.45,
                 category_allowlist=["person", *WATCHED_OBJECTS],
             )

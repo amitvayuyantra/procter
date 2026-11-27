@@ -16,28 +16,48 @@ An online exam system that watches for cheating using AI.
 
 A problem has to last a few seconds before it counts, and can't repeat for 15 s. This avoids false alarms. Each event adds risk points (see `backend/app/risk.py`); the admin sees a **Low / Medium / High** score with a camera snapshot for every event. **The AI only flags. A human decides.**
 
-## Run it
+## Run it (Windows, Mac, Linux)
 
-**1. Backend** (needs Python 3.10+)
+You need **Python 3.10+** and **Node 20+**. Open two terminals (PowerShell or Command Prompt on Windows).
+
+**1. Backend**
+
+Windows (PowerShell):
+```powershell
+cd backend
+py -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env
+python run.py
+```
+
+Mac / Linux:
 ```bash
 cd backend
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-# Linux only, if MediaPipe complains about libEGL:  sudo apt install libegl1 libgles2
-ADMIN_KEY=choose-a-password uvicorn app.main:app --port 8000
+cp .env.example .env
+python run.py
 ```
-The two AI model files (~11 MB) download automatically on first start.
 
-**2. Frontend** (needs Node 20+)
+Open `backend/.env` and change `ADMIN_KEY` to your own password first.
+The two AI model files (~11 MB) download automatically on first start.
+(Linux only: if MediaPipe complains about libEGL, run `sudo apt install libegl1 libgles2`.)
+
+**2. Frontend** (same on every system)
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-Open http://localhost:3000 for the student page and http://localhost:3000/admin for the dashboard (use your `ADMIN_KEY`; default `admin123` — change it).
+Open http://localhost:3000 for students and http://localhost:3000/admin for the dashboard.
+Webcams only work on `localhost` or HTTPS.
 
-Settings: `backend/.env.example` and `frontend/.env.example`. Webcams need `localhost` or HTTPS.
+Windows tips: if PowerShell blocks `activate`, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
+If `pip install` fails on mediapipe, make sure you use 64-bit Python.
 
 ## Tests
 ```bash

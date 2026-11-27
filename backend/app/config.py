@@ -1,7 +1,11 @@
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")  # settings file works the same on Windows, Mac and Linux
+
 DATA_DIR = BASE_DIR / "data"
 MODEL_DIR = BASE_DIR / "models"
 EVIDENCE_DIR = DATA_DIR / "evidence"
